@@ -1,0 +1,10 @@
+.DS_Store
+.conda-env/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+runs/
+datasets/
+checkpoints/
+dist/
