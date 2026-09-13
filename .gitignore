@@ -6,5 +6,6 @@ __pycache__/
 *.egg-info/
 runs/
 datasets/
+dataset/
 checkpoints/
 dist/
