@@ -54,7 +54,7 @@ def iq_gate(measurement: dict) -> dict:
 
 
 class AnalyticSimulator:
-    backend_name = "analytic_surrogate_v0.1"
+    backend_name = "analytic-surrogate-1.0"
 
     def __init__(self, seed: int = 20260903, noise_scale: float = 1.0):
         if not np.isfinite(noise_scale) or noise_scale < 0:

@@ -10,3 +10,10 @@ The release has four explicit layers:
 The simulation backend and a future hardware backend must satisfy the same typed observation contract. A hardware adapter is not considered validated merely because it imports successfully: it requires device-specific limits, readback, timeout, lock, emergency-stop and supervised dry-run evidence.
 
 Release acceptance requires unit tests, dataset audit, base-model frozen-context baseline, LoRA training, test/OOD comparison, fresh-seed closed-loop runs, artifact checksums and a downloadable GitHub release asset. Simulation evidence must be labelled as such.
+
+The automated release gate requires at least 98% valid native calls, 90% next-tool
+accuracy, 85% exact bounded-argument accuracy and 98% controller-executable calls
+on both the frozen test and OOD samples. Next-tool accuracy may not regress against
+the unmodified base model. At least two of three fresh-seed adapted closed-loop
+episodes must be accepted, with no invalid action, tool error or policy error.
+Failure leaves the run evidence intact but prevents adapter packaging.

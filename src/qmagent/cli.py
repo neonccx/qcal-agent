@@ -73,7 +73,7 @@ def batch_main(argv=None) -> int:
         "iq_thresholds": IQ_THRESHOLDS, "required_iq_passes": 2, "source_sha256": source_hashes,
         "hf_attention_policy": "sdpa with cudnn disabled; native flash/efficient/math dispatch",
         "environment": {"python": platform.python_version(), "numpy": np.__version__, "scipy": scipy.__version__},
-        "dataset_relationship": "new online synthetic episodes; not v1.1 held-out test qubits",
+        "dataset_relationship": "fresh online synthetic episodes; disjoint from frozen training/test devices",
     })
     summaries = []
     policy = None
@@ -126,7 +126,7 @@ def main(argv=None) -> int:
     if argv and argv[0] == "rpc":
         from .rpc import main as rpc_main
         return rpc_main(argv[1:])
-    # Preserve v0.1 automation commands with --output-dir.
+    # Preserve the non-interactive automation form with --output-dir.
     if any(item == "--output-dir" or item.startswith("--output-dir=") for item in argv):
         return batch_main(argv)
     from .terminal import main as terminal_main

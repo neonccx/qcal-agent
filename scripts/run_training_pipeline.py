@@ -117,12 +117,38 @@ def main() -> None:
             if arm == "adapted":
                 command += ["--adapter", adapter]
             run(f"closed_loop_{arm}", command, scientific_failure=True)
+        acceptance = {"schema": "qcal-release-gate-1.0", "checks": {}}
+        for split in ("test", "ood"):
+            metrics = json.loads((root / f"adapted_{split}" / "metrics.json").read_text())
+            controller = json.loads((root / f"adapted_{split}" / "controller_score.json").read_text())
+            comparison = json.loads((root / f"comparison_{split}.json").read_text())
+            checks = {
+                "valid_call_rate": metrics["valid_rate"] >= 0.98,
+                "next_tool_accuracy": metrics["next_tool_correct_rate"] >= 0.90,
+                "argument_accuracy": metrics["arguments_correct_rate"] >= 0.85,
+                "controller_executable_rate": controller["controller_executable_rate"] >= 0.98,
+                "no_next_tool_regression": comparison["metrics"]["next_tool_correct"]["delta_percentage_points"] >= 0,
+            }
+            acceptance["checks"][split] = checks
+        closed_loop = json.loads((root / "closed_loop_adapted" / "summary.json").read_text())
+        acceptance["checks"]["closed_loop"] = {
+            "at_least_two_of_three_accepted": closed_loop["statuses"]["accepted"] >= 2,
+            "no_invalid_policy_actions": closed_loop["statuses"]["invalid_action"] == 0,
+            "no_tool_or_policy_errors": (closed_loop["statuses"]["tool_error"] == 0
+                                          and closed_loop["statuses"]["policy_error"] == 0),
+        }
+        acceptance["all_passed"] = all(
+            value for group in acceptance["checks"].values() for value in group.values())
+        (root / "release_acceptance.json").write_text(json.dumps(acceptance, indent=2) + "\n")
+        if not acceptance["all_passed"]:
+            raise RuntimeError("Release acceptance gates failed; do not package or publish this adapter")
         release = root / "release"
         release.mkdir()
         artifact = release / "qcal-agent-1.0.0-lora.safetensors"
         artifact.write_bytes((adapter / "adapter_model.safetensors").read_bytes())
         evidence = {"version": "1.0.0", "model": str(model), "dataset": str(dataset),
             "adapter_sha256": sha256(artifact), "dataset_manifest_sha256": sha256(dataset / "manifest.json"),
+            "release_acceptance_sha256": sha256(root / "release_acceptance.json"),
             "comparison_test_sha256": sha256(root / "comparison_test.json"),
             "comparison_ood_sha256": sha256(root / "comparison_ood.json")}
         (release / "release_manifest.json").write_text(json.dumps(evidence, indent=2) + "\n")
