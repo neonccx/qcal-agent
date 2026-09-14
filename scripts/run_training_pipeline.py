@@ -27,6 +27,8 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--closed-loop-seed", type=int, default=2026091370,
                         help="First seed for the three closed-loop release episodes")
+    parser.add_argument("--save-steps", type=int, default=100,
+                        help="LoRA checkpoint interval; use a smaller value on preemptible hosts")
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     model, dataset, root = args.model.resolve(), args.dataset.resolve(), args.run_dir.resolve()
@@ -34,8 +36,8 @@ def main() -> None:
         raise ValueError(f"Model checkpoint is missing: {model}")
     if not (dataset / "manifest.json").is_file():
         raise ValueError(f"Dataset is missing: {dataset}")
-    if args.eval_limit < 1 or args.batch_size < 1:
-        raise ValueError("Evaluation limit and batch size must be positive")
+    if args.eval_limit < 1 or args.batch_size < 1 or args.save_steps < 1:
+        raise ValueError("Evaluation limit, batch size and save steps must be positive")
     root.mkdir(parents=True, exist_ok=False)
     source_paths = [project / "training" / "train_lora.py",
         project / "training" / "assistant_loss.py", Path(__file__).resolve(),
@@ -95,7 +97,7 @@ def main() -> None:
             "--output-dir", root / "training", "--baseline-metrics", root / "baseline_test" / "metrics.json",
             "--dataset-audit", audit_file, "--max-length", "20480", "--epochs", "1",
             "--micro-batch", "2", "--gradient-accumulation", "5", "--logging-steps", "5",
-            "--eval-steps", "150", "--save-steps", "100", "--assistant-only-projection",
+            "--eval-steps", "150", "--save-steps", str(args.save_steps), "--assistant-only-projection",
             "--no-load-best-model"])
         if not (adapter / "adapter_config.json").is_file():
             raise RuntimeError("Training did not produce final_adapter")
