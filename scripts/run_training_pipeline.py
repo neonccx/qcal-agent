@@ -25,6 +25,8 @@ def main() -> None:
     parser.add_argument("--gpu", default="0", help="One CUDA device index; the pipeline is single-process")
     parser.add_argument("--eval-limit", type=int, default=160)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--closed-loop-seed", type=int, default=2026091370,
+                        help="First seed for the three closed-loop release episodes")
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     model, dataset, root = args.model.resolve(), args.dataset.resolve(), args.run_dir.resolve()
@@ -40,7 +42,8 @@ def main() -> None:
         project / "scripts" / "evaluate_policy.py", project / "src" / "qmagent" / "policies.py"]
     state = {"schema": "qcal-training-run-1.0", "pid": os.getpid(), "status": "running",
         "started": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "model": str(model), "dataset": str(dataset), "gpu": args.gpu, "stages": [],
+        "model": str(model), "dataset": str(dataset), "gpu": args.gpu,
+        "closed_loop_seed": args.closed_loop_seed, "stages": [],
         "scope": "Synthetic single-qubit research; no hardware or coupler access",
         "source_sha256": {str(path.relative_to(project)): sha256(path) for path in source_paths}}
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=args.gpu, HF_HUB_OFFLINE="1",
@@ -111,7 +114,7 @@ def main() -> None:
         for arm in ("base", "adapted"):
             command = [python, "-m", "qmagent.cli", "run", "--policy", "hf",
                 "--decode-backend", "hf", "--model", model, "--trust-remote-code",
-                "--backend", "physical", "--seed", "2026091370", "--episodes", "3",
+                "--backend", "physical", "--seed", str(args.closed_loop_seed), "--episodes", "3",
                 "--max-steps", "45", "--max-tool-calls", "10", "--request-timeout", "300",
                 "--output-dir", root / f"closed_loop_{arm}"]
             if arm == "adapted":
