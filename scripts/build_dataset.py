@@ -78,9 +78,18 @@ def variants(split: str):
         return (("drift", 1.0, False), ("quasistatic", 1.0, False),
                 ("nominal", 30.0, False), ("flux_edge", 1.0, False),
                 ("low_xeb", 0.5, False))
-    return (("nominal", 0.5, False), ("nominal", 1.0, False),
-            ("nominal", 8.0, False), ("ambiguous", 1.0, False),
-            ("nominal", 1.0, True))
+    common = (("nominal", 0.5, False), ("nominal", 1.0, False),
+              ("nominal", 8.0, False), ("ambiguous", 1.0, False),
+              ("nominal", 1.0, True))
+    # The controller must learn that a reliable Ramsey fit can still require a
+    # second Ramsey experiment after applying a correction >= 50 kHz.  The
+    # original nominal-only train distribution never produced that branch,
+    # while drift/quasistatic evaluation did.  Include those physical regimes
+    # only for train/validation devices; keep the frozen test and OOD recipes
+    # byte-for-byte stable so a rebuilt dataset remains comparable.
+    if split in {"train", "validation"}:
+        return common + (("drift", 1.0, False), ("quasistatic", 1.0, False))
+    return common
 
 
 def build(output: Path, devices: int = 64) -> dict:
@@ -147,6 +156,11 @@ def build(output: Path, devices: int = 64) -> dict:
         "physics_version": PhysicalSimulator.backend_name, "teacher": "observable_only_rule_policy_1.0",
         "training_ready": True, "release_scope": "single_qubit_simulation_research_not_hardware_validated",
         "data_origin": "executed reduced flux-transmon/cQED/single-qubit-XEB simulator",
+        "distribution_design": {
+            "train_validation": "device-disjoint nominal, ambiguity, scan-coverage, drift and quasistatic regimes",
+            "test": "held-out devices using the original in-distribution recipe",
+            "ood": "held-out devices with severe noise and exclusive flux-edge/low-XEB regimes plus drift/quasistatic stress",
+        },
         "loss_scope": "one next assistant native call per sample; preceding context fully masked",
         "device_counts": {key: len(value) for key, value in groups.items()},
         "sample_counts": {key: len(value) for key, value in rows.items()},
