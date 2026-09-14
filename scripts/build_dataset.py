@@ -8,6 +8,7 @@ from collections import Counter
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -92,7 +93,7 @@ def variants(split: str):
     return common
 
 
-def build(output: Path, devices: int = 64) -> dict:
+def build(output: Path, devices: int = 64, frozen_eval_from: Path | None = None) -> dict:
     if devices < 8 or devices % 8:
         raise ValueError("devices must be a multiple of eight and at least eight")
     output.mkdir(parents=True, exist_ok=False)
@@ -143,6 +144,46 @@ def build(output: Path, devices: int = 64) -> dict:
             episodes.append({"episode_id": episode_id, "device_id": device_id, "split": split,
                              "status": runner.status, "samples": len(sample_ids)})
         print(f"device {device_index + 1}/{total_devices} {split}", flush=True)
+    frozen_eval = None
+    if frozen_eval_from is not None:
+        frozen_eval_from = frozen_eval_from.resolve()
+        frozen_manifest_path = frozen_eval_from / "manifest.json"
+        if not frozen_manifest_path.is_file():
+            raise ValueError("Frozen evaluation dataset is missing manifest.json")
+        frozen_manifest = json.loads(frozen_manifest_path.read_text(encoding="utf-8"))
+        frozen_episode_ids = set()
+        for split in ("test", "ood"):
+            source = frozen_eval_from / f"{split}.jsonl"
+            expected_hash = frozen_manifest["split_sha256"][split]
+            if hashlib.sha256(source.read_bytes()).hexdigest() != expected_hash:
+                raise ValueError(f"Frozen {split} checksum mismatch")
+            rows[split] = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line]
+            frozen_episode_ids.update(row["episode_id"] for row in rows[split])
+            for row in rows[split]:
+                context = json.loads(row["messages"][-2]["content"])
+                reference = (context.get("observation") or {}).get("raw_reference", {}).get("sha256")
+                if reference:
+                    source_artifact = frozen_eval_from / "artifacts" / f"{reference}.json"
+                    target_artifact = artifacts / source_artifact.name
+                    if not source_artifact.is_file():
+                        raise ValueError(f"Frozen artifact is missing: {reference}")
+                    if not target_artifact.exists():
+                        shutil.copyfile(source_artifact, target_artifact)
+        for episode_id in frozen_episode_ids:
+            for directory in ("trajectories", "audit", "evaluator_only"):
+                source = frozen_eval_from / directory / f"{episode_id}.json"
+                if not source.is_file():
+                    raise ValueError(f"Frozen evaluation evidence is missing: {source}")
+                shutil.copyfile(source, output / directory / source.name)
+        episodes = ([item for item in episodes if item["split"] not in {"test", "ood"}] +
+                    [item for item in frozen_manifest["episodes"] if item["split"] in {"test", "ood"}])
+        frozen_eval = {
+            "manifest_sha256": hashlib.sha256(frozen_manifest_path.read_bytes()).hexdigest(),
+            "split_sha256": {split: frozen_manifest["split_sha256"][split] for split in ("test", "ood")},
+        }
+    targets = Counter(row["messages"][-1]["tool_calls"][0]["function"]["arguments"]["next_tool"]
+                      for samples in rows.values() for row in samples)
+    outcomes = Counter(f'{item["split"]}:{item["status"]}' for item in episodes)
     for split, samples in rows.items():
         with (output / f"{split}.jsonl").open("x", encoding="utf-8") as handle:
             for row in samples:
@@ -161,6 +202,7 @@ def build(output: Path, devices: int = 64) -> dict:
             "test": "held-out devices using the original in-distribution recipe",
             "ood": "held-out devices with severe noise and exclusive flux-edge/low-XEB regimes plus drift/quasistatic stress",
         },
+        "frozen_evaluation": frozen_eval,
         "loss_scope": "one next assistant native call per sample; preceding context fully masked",
         "device_counts": {key: len(value) for key, value in groups.items()},
         "sample_counts": {key: len(value) for key, value in rows.items()},
@@ -183,5 +225,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--devices", type=int, default=64)
+    parser.add_argument("--frozen-eval-from", type=Path,
+                        help="Reuse immutable test/OOD rows and evidence from an audited dataset")
     arguments = parser.parse_args()
-    build(arguments.output, arguments.devices)
+    build(arguments.output, arguments.devices, arguments.frozen_eval_from)
