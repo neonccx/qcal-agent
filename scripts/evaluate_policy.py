@@ -77,13 +77,15 @@ def main() -> None:
         "sampling": "all rows" if not args.limit else "round-robin action-stratified subset",
         "batch_size": args.batch_size, "prompt_profile": args.prompt_profile,
         "system_prompt_sha256": hashlib.sha256(system_prompt.encode()).hexdigest(),
+        "context_transform_sha256": hashlib.sha256(
+            (Path(__file__).resolve().parents[1] / "src/qmagent/protocol.py").read_bytes()).hexdigest(),
         "tokenizer_sha256": hashlib.sha256(
             (Path(args.model) / "tokenizer_config.json").read_bytes()).hexdigest()}
     records = []
     if args.resume:
         recorded = json.loads((args.output / "config.json").read_text())
         immutable = ("protocol", "model", "adapter", "test_sha256", "selected_ids", "batch_size",
-                     "prompt_profile", "system_prompt_sha256", "tokenizer_sha256")
+                     "prompt_profile", "system_prompt_sha256", "tokenizer_sha256", "context_transform_sha256")
         mismatches = [key for key in immutable if recorded.get(key) != config.get(key)]
         if mismatches:
             raise ValueError("Resume config mismatch: " + ", ".join(mismatches))

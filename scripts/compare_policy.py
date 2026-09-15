@@ -33,6 +33,8 @@ def compare(baseline, adapted, *, comparison="weights"):
         if before.get(key) != after.get(key) or key not in before:
             raise ValueError(f"Unmatched comparison input: {key}")
     if comparison == "weights":
+        if before.get("context_transform_sha256") != after.get("context_transform_sha256"):
+            raise ValueError("Weight comparison requires identical context transformations")
         if before.get("adapter") is not None or not after.get("adapter"):
             raise ValueError("Expected an unmodified baseline and an explicit adapted checkpoint")
         comparison_metadata = {"dimension": "weights", "baseline_adapter": None,
@@ -59,7 +61,12 @@ def compare(baseline, adapted, *, comparison="weights"):
                 before["system_prompt_sha256"] == after["system_prompt_sha256"]):
             raise ValueError("Prompt revision requires two distinct recorded prompt hashes")
         comparison_metadata = {
-            "dimension": "system_prompt",
+            "dimension": "system_prompt_and_context" if before.get("context_transform_sha256") !=
+                after.get("context_transform_sha256") else "system_prompt",
+            "baseline_context_transform_sha256": before.get("context_transform_sha256"),
+            "candidate_context_transform_sha256": after.get("context_transform_sha256"),
+            "context_hash_note": "Legacy evaluation did not record its context transformation"
+                if before.get("context_transform_sha256") is None else None,
             "baseline_profile": before_profile,
             "candidate_profile": after_profile,
             "baseline_system_prompt_sha256": before.get("system_prompt_sha256"),

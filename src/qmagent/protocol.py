@@ -25,6 +25,22 @@ TOOLS_SCHEMA = [{"type": "function", "function": {
 def public_context(context):
     """Keep exact fitted values; raw arrays and hidden simulator state never enter prompts."""
     view = copy.deepcopy(context)
+    # Derived only from public controller counters and fitted observations.
+    # This is an input aid, not a replacement action or a post-hoc correction.
+    budget = view.get("budget")
+    if budget is not None:
+        remaining = budget["remaining_experiments"]
+        counts = budget["tool_counts"]
+        maximum = budget["max_calls_per_tool"]
+        view["execution_constraints"] = {
+            "experiments_available": remaining > 0,
+            "retry_exhausted_tools": [tool for tool in TOOLS if counts.get(tool, 0) >= maximum],
+            "source": "public budget counters; does not select the next action",
+        }
+        observation = view.get("observation") or {}
+        if observation.get("tool") == "sq.ramsey_df" and observation.get("quality", {}).get("reliable"):
+            correction = observation["fit_result"]["frequency_correction_hz"]
+            view["execution_constraints"]["ramsey_frequency_within_tolerance"] = abs(correction) < 50_000
     obs = view.get("observation")
     if obs:
         measurement = obs.pop("measurement", {})

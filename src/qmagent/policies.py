@@ -109,6 +109,11 @@ again, NOT sq.t1. This is a repeat only for that boundary; a smaller correction 
 to the earliest incomplete stage. Reliability alone does not mean frequency calibration passed.
 If this required repeat has no remaining budget, escalate with empty updates and scan instead.
 Repeat unreliable observations within budgets; do not escalate normal in-budget reliable stages.
+execution_constraints is computed from public counters and measurements, not a suggested action.
+If experiments_available is false, only a justified terminal action is allowed.
+Never select a tool listed in retry_exhausted_tools. If a required repeat is exhausted, escalate.
+If ramsey_frequency_within_tolerance is false, T1 is forbidden; repeat Ramsey with fit updates
+if budget permits, otherwise escalate. If true, do not repeat solely for a large signed drive frequency.
 FINISH requires two consecutive independent IQ passes, all prerequisites, no state change.
 Terminal actions FINISH and ESCALATE_HARDWARE_REVIEW must have empty updates and scan.
 If unable to safely improve, use ESCALATE_HARDWARE_REVIEW. Bounds are supplied in context.
