@@ -16,3 +16,11 @@ def test_public_constraints_are_signed_boundary_safe_and_nonmutating(correction,
     assert result["retry_exhausted_tools"] == ["sq.ramsey_df"]
     assert result["ramsey_frequency_within_tolerance"] is within
     assert "next_tool" not in result
+
+
+def test_confirmation_flags_require_public_evidence():
+    context = {"budget": {"remaining_experiments": 30, "tool_counts": {}, "max_calls_per_tool": 10},
+               "observation": {"tool": "sq.piamp", "round_in_experiment": 1}}
+    flags = public_context(context)["execution_constraints"]
+    assert not flags["piamp_confirmation_acquired"]
+    assert not flags["finish_permitted"]

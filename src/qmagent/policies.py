@@ -114,6 +114,11 @@ If experiments_available is false, only a justified terminal action is allowed.
 Never select a tool listed in retry_exhausted_tools. If a required repeat is exhausted, escalate.
 If ramsey_frequency_within_tolerance is false, T1 is forbidden; repeat Ramsey with fit updates
 if budget permits, otherwise escalate. If true, do not repeat solely for a large signed drive frequency.
+If piamp_confirmation_acquired is false, repeat sq.piamp with fitted pi and pi/2 amplitudes;
+do not select Ramsey yet. If finish_permitted is false, never return FINISH, even if the
+latest IQ fit passes: acquire another independent IQ confirmation if its budget permits.
+Check these constraints immediately before the call; total budget remaining does not override
+an exhausted per-tool budget, and a correction of 50026 Hz is still above 50000 Hz.
 FINISH requires two consecutive independent IQ passes, all prerequisites, no state change.
 Terminal actions FINISH and ESCALATE_HARDWARE_REVIEW must have empty updates and scan.
 If unable to safely improve, use ESCALATE_HARDWARE_REVIEW. Bounds are supplied in context.

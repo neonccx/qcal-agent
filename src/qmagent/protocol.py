@@ -4,7 +4,7 @@ import copy
 import json
 import re
 
-from .contracts import TOOLS, parse_decision
+from .contracts import CALIBRATION_STAGES, TOOLS, parse_decision
 from .storage import digest
 
 PROTOCOL_VERSION = "calibration-step-1.0"
@@ -38,6 +38,13 @@ def public_context(context):
             "source": "public budget counters; does not select the next action",
         }
         observation = view.get("observation") or {}
+        view["execution_constraints"]["finish_permitted"] = (
+            view.get("consecutive_iq_passes", 0) >= 2
+            and set(view.get("completed_stages", [])) == set(CALIBRATION_STAGES)
+            and observation.get("tool") == "sq.iqraw")
+        if observation.get("tool") == "sq.piamp":
+            view["execution_constraints"]["piamp_confirmation_acquired"] = (
+                observation.get("round_in_experiment", 0) >= 2)
         if observation.get("tool") == "sq.ramsey_df" and observation.get("quality", {}).get("reliable"):
             correction = observation["fit_result"]["frequency_correction_hz"]
             view["execution_constraints"]["ramsey_frequency_within_tolerance"] = abs(correction) < 50_000
