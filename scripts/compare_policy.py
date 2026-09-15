@@ -51,10 +51,13 @@ def compare(baseline, adapted, *, comparison="weights"):
             raise ValueError("Prompt comparison requires identical checkpoint/adapter")
         before_profile = before.get("prompt_profile") or "skill"
         after_profile = after.get("prompt_profile")
-        if before_profile != "skill" or after_profile != "minimal":
-            raise ValueError("Expected skill-to-minimal prompt comparison")
+        if (before_profile, after_profile) not in {("skill", "minimal"), ("skill", "skill")}:
+            raise ValueError("Expected skill-to-minimal or skill revision prompt comparison")
         if not after.get("system_prompt_sha256"):
             raise ValueError("Minimal prompt hash is missing")
+        if before_profile == after_profile and (not before.get("system_prompt_sha256") or
+                before["system_prompt_sha256"] == after["system_prompt_sha256"]):
+            raise ValueError("Prompt revision requires two distinct recorded prompt hashes")
         comparison_metadata = {
             "dimension": "system_prompt",
             "baseline_profile": before_profile,

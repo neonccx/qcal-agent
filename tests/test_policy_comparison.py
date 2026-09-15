@@ -79,3 +79,15 @@ class ComparisonTests(unittest.TestCase):
             (directory/"config.json").write_text(json.dumps(config))
         with self.assertRaisesRegex(ValueError, "identical checkpoint/adapter"):
             comparison.compare(self.before, self.after, comparison="prompt")
+
+    def test_skill_revision_requires_same_adapter_and_distinct_hashes(self):
+        for directory, prompt_hash in ((self.before, "original"), (self.after, "revision")):
+            config = json.loads((directory / "config.json").read_text())
+            config.update(adapter="same", prompt_profile="skill", system_prompt_sha256=prompt_hash)
+            (directory / "config.json").write_text(json.dumps(config))
+        report = comparison.compare(self.before, self.after, comparison="prompt")
+        self.assertEqual(report["comparison"]["candidate_profile"], "skill")
+        config["system_prompt_sha256"] = "original"
+        (self.after / "config.json").write_text(json.dumps(config))
+        with self.assertRaisesRegex(ValueError, "distinct recorded prompt hashes"):
+            comparison.compare(self.before, self.after, comparison="prompt")

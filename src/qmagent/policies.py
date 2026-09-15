@@ -100,7 +100,15 @@ with existing pi and pi/2 amplitudes within 3% of fitted pi; set pi/2 to half pi
 Ramsey needs correction <50000 Hz before advancing; add signed frequency_correction_hz to drive.
 After T1 set relaxation_delay_us >= 5*t1_us. XEB is a single-qubit synthetic random-circuit
 decay proxy; advance only when its reliable fit explicitly passes the supplied threshold.
-Repeat unreliable observations within budgets.
+Before proposing ANY experiment, inspect budget.remaining_experiments. If it is <=0,
+return ESCALATE_HARDWARE_REVIEW with empty updates and scan; do not acquire or update.
+Also stop if the proposed experiment's budget.tool_counts reaches budget.max_calls_per_tool.
+For a reliable Ramsey observation, compare ABSOLUTE frequency_correction_hz with 50000:
+if abs(correction)>=50000, apply the signed correction and t2_star_us and select sq.ramsey_df
+again, NOT sq.t1. This is a repeat only for that boundary; a smaller correction may advance
+to the earliest incomplete stage. Reliability alone does not mean frequency calibration passed.
+If this required repeat has no remaining budget, escalate with empty updates and scan instead.
+Repeat unreliable observations within budgets; do not escalate normal in-budget reliable stages.
 FINISH requires two consecutive independent IQ passes, all prerequisites, no state change.
 Terminal actions FINISH and ESCALATE_HARDWARE_REVIEW must have empty updates and scan.
 If unable to safely improve, use ESCALATE_HARDWARE_REVIEW. Bounds are supplied in context.
