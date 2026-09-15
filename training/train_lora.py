@@ -13,7 +13,7 @@ from typing import Any
 
 import torch
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -76,6 +76,8 @@ def main() -> None:
     parser.add_argument("--train-file", required=True)
     parser.add_argument("--validation-file", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--initial-adapter",
+                        help="Existing audited LoRA adapter to continue training from")
     parser.add_argument("--max-length", type=int, default=20480)
     parser.add_argument("--max-train-samples", type=int, default=0, help="0 means all; nonzero only for smoke tests")
     parser.add_argument("--max-validation-samples", type=int, default=0, help="0 means all; nonzero only for smoke tests")
@@ -113,6 +115,8 @@ def main() -> None:
         parser.error("Output directory is not empty; use a new directory or explicit resume")
     if args.baseline_metrics and not Path(args.baseline_metrics).is_file():
         parser.error("Pre-training metrics file not found")
+    if args.initial_adapter and not (Path(args.initial_adapter) / "adapter_model.safetensors").is_file():
+        parser.error("Initial adapter is missing adapter_model.safetensors")
     if args.baseline_metrics:
         baseline = json.loads(Path(args.baseline_metrics).read_text())
         if baseline.get("sample_count", 0) <= 0:
@@ -126,11 +130,17 @@ def main() -> None:
         audit = json.loads(Path(args.dataset_audit).read_text())
         if not manifest.get("training_ready") or not audit.get("all_passed") or not audit.get("tokenizer_checked"):
             parser.error("Dataset/tokenizer release checks have not passed")
-        if baseline.get("adapter") is not None or baseline.get("dataset_sha256") != manifest["split_sha256"]["test"]:
-            parser.error("Baseline is not the unmodified model on this frozen test split")
+        if baseline.get("dataset_sha256") != manifest["split_sha256"]["test"]:
+            parser.error("Baseline uses a different frozen test split")
         baseline_config = json.loads((Path(args.baseline_metrics).parent/"config.json").read_text())
         if Path(baseline_config["model"]).resolve() != Path(args.model).resolve():
             parser.error("Baseline model differs from the training checkpoint")
+        recorded_adapter = baseline_config.get("adapter")
+        if args.initial_adapter:
+            if not recorded_adapter or Path(recorded_adapter).resolve() != Path(args.initial_adapter).resolve():
+                parser.error("Baseline adapter differs from --initial-adapter")
+        elif baseline.get("adapter") is not None or recorded_adapter is not None:
+            parser.error("Fresh LoRA training requires an unmodified-model baseline")
         for split, source in (("train", args.train_file), ("validation", args.validation_file)):
             if hashlib.sha256(Path(source).read_bytes()).hexdigest() != manifest["split_sha256"][split]:
                 parser.error("Training/validation split changed after release")
@@ -175,6 +185,7 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     config_path = output / ("resume_config.json" if args.resume_from_checkpoint else "run_config.json")
     config_path.write_text(json.dumps(vars(args) | {"baseline_sha256": hashlib.sha256(Path(args.baseline_metrics).read_bytes()).hexdigest() if args.baseline_metrics else None,
+                          "initial_adapter_sha256": hashlib.sha256((Path(args.initial_adapter)/"adapter_model.safetensors").read_bytes()).hexdigest() if args.initial_adapter else None,
                           "training_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                           "assistant_loss_sha256": hashlib.sha256(Path(__file__).with_name("assistant_loss.py").read_bytes()).hexdigest() if args.assistant_only_projection else None,
                           "tokenizer_config_sha256": hashlib.sha256((Path(args.model)/"tokenizer_config.json").read_bytes()).hexdigest(),
@@ -201,15 +212,19 @@ def main() -> None:
         raise RuntimeError(f"unexpected model module names; observed linear suffixes={sorted(observed_suffixes)}")
     print(json.dumps({"lora_target_modules": target_modules}, ensure_ascii=False), flush=True)
 
-    peft_config = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=target_modules,
-    )
-    model = get_peft_model(model, peft_config)
+    if args.initial_adapter:
+        model = PeftModel.from_pretrained(
+            model, args.initial_adapter, is_trainable=True, local_files_only=True)
+    else:
+        peft_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=target_modules,
+        )
+        model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
     training_args = TrainingArguments(
