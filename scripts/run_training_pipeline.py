@@ -29,6 +29,10 @@ def main() -> None:
                         help="First seed for the three closed-loop release episodes")
     parser.add_argument("--save-steps", type=int, default=100,
                         help="LoRA checkpoint interval; use a smaller value on preemptible hosts")
+    parser.add_argument("--epochs", type=float, default=1.0)
+    parser.add_argument("--eval-steps", type=int, default=150)
+    parser.add_argument("--load-best-model", action="store_true",
+                        help="Select minimum validation-loss checkpoint; eval/save intervals must match")
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     model, dataset, root = args.model.resolve(), args.dataset.resolve(), args.run_dir.resolve()
@@ -38,6 +42,10 @@ def main() -> None:
         raise ValueError(f"Dataset is missing: {dataset}")
     if args.eval_limit < 1 or args.batch_size < 1 or args.save_steps < 1:
         raise ValueError("Evaluation limit, batch size and save steps must be positive")
+    if args.epochs <= 0 or args.eval_steps < 1:
+        raise ValueError("Epochs and evaluation interval must be positive")
+    if args.load_best_model and args.save_steps != args.eval_steps:
+        raise ValueError("Best-model selection requires matching save/evaluation intervals")
     root.mkdir(parents=True, exist_ok=False)
     source_paths = [project / "training" / "train_lora.py",
         project / "training" / "assistant_loss.py", Path(__file__).resolve(),
@@ -95,10 +103,10 @@ def main() -> None:
         run("training", [python, project / "training" / "train_lora.py", "--model", model,
             "--train-file", dataset / "train.jsonl", "--validation-file", dataset / "validation.jsonl",
             "--output-dir", root / "training", "--baseline-metrics", root / "baseline_test" / "metrics.json",
-            "--dataset-audit", audit_file, "--max-length", "20480", "--epochs", "1",
+            "--dataset-audit", audit_file, "--max-length", "20480", "--epochs", str(args.epochs),
             "--micro-batch", "2", "--gradient-accumulation", "5", "--logging-steps", "5",
-            "--eval-steps", "150", "--save-steps", str(args.save_steps), "--assistant-only-projection",
-            "--no-load-best-model"])
+            "--eval-steps", str(args.eval_steps), "--save-steps", str(args.save_steps), "--assistant-only-projection",
+            "--load-best-model" if args.load_best_model else "--no-load-best-model"])
         if not (adapter / "adapter_config.json").is_file():
             raise RuntimeError("Training did not produce final_adapter")
         for split in ("test", "ood"):
