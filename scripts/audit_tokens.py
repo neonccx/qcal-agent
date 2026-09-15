@@ -18,6 +18,11 @@ def audit(dataset: Path, model: Path | None = None) -> dict:
     manifest = json.loads((dataset / "manifest.json").read_text())
     if manifest["schema"] != PROTOCOL_VERSION:
         raise ValueError("Dataset protocol does not match this runtime")
+    frozen_rebuild = manifest.get("complete_workflow_schema") == "qcal-complete-workflow-1.0"
+    if frozen_rebuild:
+        protocol_path = Path(__file__).resolve().parents[1] / "src/qmagent/protocol.py"
+        if manifest.get("context_transform_sha256") != hashlib.sha256(protocol_path.read_bytes()).hexdigest():
+            raise ValueError("Complete-workflow input transformation changed; rebuild training data")
     groups, counts, lengths, loss_lengths = {}, {}, [], []
     tokenizer = None
     if model:
@@ -34,7 +39,15 @@ def audit(dataset: Path, model: Path | None = None) -> dict:
             groups[split].add(row["device_id"])
             counts[split] += 1
             context = json.loads(row["messages"][1]["content"])
-            if policy_messages(context) != row["messages"][:-1]:
+            online_messages = policy_messages(context)
+            if frozen_rebuild and split in ("test", "ood"):
+                source_hash = manifest.get("source_split_sha256", {}).get(split)
+                if (manifest.get("frozen_evaluation", {}).get(split) != source_hash or
+                        hashlib.sha256(raw).hexdigest() != source_hash):
+                    raise ValueError("Frozen evaluation source checksum mismatch")
+                # Match evaluate_policy: frozen contexts/answers, regenerated runtime prompt.
+                row = {**row, "messages": online_messages + [row["messages"][-1]]}
+            elif online_messages != row["messages"][:-1]:
                 raise ValueError("Online/training prompt mismatch")
             visible = json.dumps(row["messages"])
             forbidden = ('"_truth"', '"ground_truth"', '"recommended_update"',
@@ -69,6 +82,7 @@ def audit(dataset: Path, model: Path | None = None) -> dict:
         if hashlib.sha256(path.read_bytes()).hexdigest() != path.stem:
             raise ValueError("Artifact hash mismatch")
     return {"all_passed": True, "protocol": PROTOCOL_VERSION, "sample_counts": counts,
+        "frozen_evaluation_runtime_prompts_rebuilt": frozen_rebuild,
         "artifact_count": len(list((dataset / "artifacts").glob("*.json"))),
         "device_counts": {key: len(value) for key, value in groups.items()},
         "tokenizer_checked": bool(tokenizer), "max_tokens": max(lengths) if lengths else None,
