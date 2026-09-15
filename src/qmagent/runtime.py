@@ -46,8 +46,11 @@ def stage_passed(observation: dict, candidate: dict) -> bool:
                 and _close(candidate["drive_frequency_hz"], previous["drive_frequency_hz"] + correction, 5e4)
                 and _close(candidate["t2_star_us"], fit["t2_star_us"], 0.1 * fit["t2_star_us"]))
     if tool == "sq.t1":
+        required_delay = 5 * fit["t1_us"]
+        delay = candidate["relaxation_delay_us"]
         return (_close(candidate["t1_us"], fit["t1_us"], 0.1 * fit["t1_us"])
-                and candidate["relaxation_delay_us"] >= 5 * fit["t1_us"])
+                and (delay >= required_delay or math.isclose(delay, required_delay,
+                                                            rel_tol=1e-14, abs_tol=0.0)))
     if tool == "sq.t2_echo":
         return _close(candidate["t2_echo_us"], fit["t2_echo_us"], 0.1 * fit["t2_echo_us"])
     if tool == "sq.xeb":
