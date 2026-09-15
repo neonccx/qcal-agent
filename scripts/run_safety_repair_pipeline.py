@@ -29,6 +29,8 @@ def main() -> None:
     parser.add_argument("--closed-loop-seed", type=int, required=True)
     parser.add_argument("--epochs", type=float, default=1.0)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
+    parser.add_argument("--resume-evaluation", action="store_true",
+                        help="Resume a failed evaluation after successful training; never retrain")
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     model = args.model.resolve()
@@ -43,7 +45,7 @@ def main() -> None:
         raise ValueError("Expected an audited repair curriculum")
     if args.epochs <= 0 or args.learning_rate <= 0:
         raise ValueError("Epochs and learning rate must be positive")
-    root.mkdir(parents=True, exist_ok=False)
+    root.mkdir(parents=True, exist_ok=args.resume_evaluation)
     audit_file = root / "tokenizer_audit.json"
     state = {
         "schema": "qcal-safety-repair-run-1.0",
@@ -60,6 +62,24 @@ def main() -> None:
         "stages": [],
         "scope": "Synthetic single-qubit safety curriculum; frozen evaluation; no hardware access",
     }
+    if args.resume_evaluation:
+        previous = json.loads((root / "status.json").read_text())
+        for key in ("model", "curriculum", "initial_run", "initial_adapter_sha256",
+                    "curriculum_manifest_sha256", "closed_loop_seed"):
+            if previous.get(key) != state[key]:
+                raise ValueError(f"Resume provenance mismatch: {key}")
+        if not any(item["stage"] == "training" and item["status"] == "completed"
+                   for item in previous["stages"]):
+            raise ValueError("Evaluation resume requires completed training")
+        if not (root / "training" / "final_adapter" / "adapter_model.safetensors").is_file():
+            raise ValueError("Completed adapter is missing")
+        state = previous
+        state.update(status="running", pid=os.getpid(), gpu=args.gpu)
+        state.pop("error", None)
+        state.setdefault("resume_history", []).append({
+            "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "adapter_sha256": sha256(root / "training" / "final_adapter" / "adapter_model.safetensors"),
+            "mode": "evaluation_only"})
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=args.gpu, HF_HUB_OFFLINE="1",
                TRANSFORMERS_OFFLINE="1", TOKENIZERS_PARALLELISM="false",
                PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True", PYTHONDONTWRITEBYTECODE="1",
@@ -72,11 +92,16 @@ def main() -> None:
         temporary.replace(root / "status.json")
 
     def run(name: str, command: list[object], scientific_failure: bool = False) -> None:
+        if args.resume_evaluation and any(item["stage"] == name and item["status"] == "completed"
+                                          for item in state["stages"]):
+            return
         item = {"stage": name, "command": list(map(str, command)), "status": "running"}
         state["stages"].append(item)
         state["current_stage"] = name
         save()
-        with (root / f"{name}.log").open("x") as log:
+        attempt = sum(item["stage"] == name for item in state["stages"])
+        log_path = root / (f"{name}.log" if attempt == 1 else f"{name}.attempt_{attempt}.log")
+        with log_path.open("x") as log:
             result = subprocess.run(list(map(str, command)), cwd=project, env=env,
                                     stdout=log, stderr=subprocess.STDOUT)
         item.update(returncode=result.returncode,
@@ -106,10 +131,13 @@ def main() -> None:
             raise RuntimeError("Safety continuation did not produce final_adapter")
         for split in ("test", "ood"):
             adapted = root / f"adapted_{split}"
-            run(f"adapted_{split}", [python, project / "scripts" / "evaluate_policy.py",
+            evaluation_command = [python, project / "scripts" / "evaluate_policy.py",
                 "--model", model, "--adapter", adapter, "--trust-remote-code",
                 "--test-file", curriculum / f"{split}.jsonl", "--output", adapted,
-                "--limit", args.eval_limit, "--batch-size", args.batch_size])
+                "--limit", args.eval_limit, "--batch-size", args.batch_size]
+            if args.resume_evaluation and (adapted / "config.json").is_file():
+                evaluation_command += ["--resume"]
+            run(f"adapted_{split}", evaluation_command)
             run(f"adapted_controller_{split}", [python, project / "scripts" / "score_policy_predictions.py",
                 "--test-file", curriculum / f"{split}.jsonl",
                 "--predictions", adapted / "predictions.jsonl",
