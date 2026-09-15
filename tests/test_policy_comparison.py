@@ -36,6 +36,22 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incomplete"):
             comparison.compare(self.before, self.after)
 
+    def test_continuation_requires_distinct_adapters_and_same_prompt(self):
+        path = self.before / "config.json"
+        config = json.loads(path.read_text())
+        config["adapter"] = "parent-adapter"
+        path.write_text(json.dumps(config))
+        report = comparison.compare(self.before, self.after, comparison="continuation")
+        self.assertEqual(report["comparison"]["dimension"], "adapter_continuation")
+        config["system_prompt_sha256"] = "changed"
+        path.write_text(json.dumps(config))
+        with self.assertRaisesRegex(ValueError, "identical system_prompt"):
+            comparison.compare(self.before, self.after, comparison="continuation")
+
+    def test_continuation_rejects_unmodified_baseline(self):
+        with self.assertRaisesRegex(ValueError, "distinct explicit adapters"):
+            comparison.compare(self.before, self.after, comparison="continuation")
+
     def test_changed_dataset_rejected(self):
         path = self.after/"config.json"
         config = json.loads(path.read_text())

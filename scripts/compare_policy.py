@@ -37,6 +37,15 @@ def compare(baseline, adapted, *, comparison="weights"):
             raise ValueError("Expected an unmodified baseline and an explicit adapted checkpoint")
         comparison_metadata = {"dimension": "weights", "baseline_adapter": None,
                                "candidate_adapter": after["adapter"]}
+    elif comparison == "continuation":
+        if not before.get("adapter") or not after.get("adapter") or before["adapter"] == after["adapter"]:
+            raise ValueError("Continuation comparison requires two distinct explicit adapters")
+        for key in ("prompt_profile", "system_prompt_sha256"):
+            if before.get(key) != after.get(key):
+                raise ValueError(f"Continuation comparison requires identical {key}")
+        comparison_metadata = {"dimension": "adapter_continuation",
+                               "baseline_adapter": before["adapter"],
+                               "candidate_adapter": after["adapter"]}
     elif comparison == "prompt":
         if before.get("adapter") != after.get("adapter"):
             raise ValueError("Prompt comparison requires identical checkpoint/adapter")
@@ -89,7 +98,7 @@ def main():
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--adapted", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--comparison", choices=("weights", "prompt"), default="weights")
+    parser.add_argument("--comparison", choices=("weights", "prompt", "continuation"), default="weights")
     args = parser.parse_args()
     report = compare(args.baseline, args.adapted, comparison=args.comparison)
     with args.output.open("x") as stream:

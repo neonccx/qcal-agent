@@ -143,6 +143,7 @@ def main() -> None:
                 "--predictions", adapted / "predictions.jsonl",
                 "--output", adapted / "controller_score.json"])
             run(f"comparison_{split}", [python, project / "scripts" / "compare_policy.py",
+                "--comparison", "continuation",
                 "--baseline", initial_run / f"adapted_{split}", "--adapted", adapted,
                 "--output", root / f"comparison_{split}.json"])
         run("closed_loop_adapted", [python, "-m", "qmagent.cli", "run", "--policy", "hf",
