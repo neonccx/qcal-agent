@@ -35,6 +35,8 @@ def main() -> None:
                         help="Select minimum validation-loss checkpoint; eval/save intervals must match")
     parser.add_argument("--resume-from-checkpoint", type=Path,
                         help="Resume an interrupted training stage in this run; preserve completed stages")
+    parser.add_argument("--resume-training-source-sha256",
+                        help="Explicit reviewed loader-fix source hash; records old/new training code on resume")
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     model, dataset, root = args.model.resolve(), args.dataset.resolve(), args.run_dir.resolve()
@@ -67,7 +69,9 @@ def main() -> None:
                 raise ValueError(f"Resume provenance mismatch: {key}")
         for path, checksum in previous["source_sha256"].items():
             if path != "scripts/run_training_pipeline.py" and sha256(project / path) != checksum:
-                raise ValueError(f"Resume source changed: {path}")
+                if not (path == "training/train_lora.py" and args.resume_training_source_sha256
+                        == sha256(project / path)):
+                    raise ValueError(f"Resume source changed: {path}")
         checkpoint = args.resume_from_checkpoint.resolve()
         if checkpoint.parent != root / "training":
             raise ValueError("Checkpoint must belong to this run")
@@ -81,6 +85,10 @@ def main() -> None:
         state.setdefault("resume_history", []).append({
             "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "checkpoint": str(checkpoint), "adapter_sha256": sha256(checkpoint / "adapter_model.safetensors"),
+            "original_training_source_sha256": previous["source_sha256"]["training/train_lora.py"],
+            "resumed_training_source_sha256": sha256(project / "training/train_lora.py"),
+            "rng_loader_sha256": sha256(project / "training/checkpoint_rng.py")
+                if (project / "training/checkpoint_rng.py").is_file() else None,
             "pipeline_sha256": sha256(Path(__file__).resolve())})
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=args.gpu, HF_HUB_OFFLINE="1",
         TRANSFORMERS_OFFLINE="1", TOKENIZERS_PARALLELISM="false",
@@ -99,7 +107,7 @@ def main() -> None:
             if any(item["status"] == "completed" for item in prior):
                 return
             if name == "training":
-                if not prior or prior[-1]["command"] != list(map(str, command)):
+                if not prior or prior[0]["command"] != list(map(str, command)):
                     raise ValueError("Training parameters changed during resume")
                 command = command + ["--resume-from-checkpoint", checkpoint]
         item = {"stage": name, "command": list(map(str, command)), "status": "running"}

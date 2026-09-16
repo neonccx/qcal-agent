@@ -285,7 +285,12 @@ def main() -> None:
         eval_dataset=validation_data,
         data_collator=CalibrationCollator(tokenizer),
     )
-    training_result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    if args.resume_from_checkpoint:
+        from checkpoint_rng import numpy_rng_loading
+        with numpy_rng_loading():
+            training_result = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    else:
+        training_result = trainer.train()
     trainer.save_metrics("train", training_result.metrics)
     trainer.save_state()
     trainer.save_model(args.output_dir + "/final_adapter")
