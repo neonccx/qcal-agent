@@ -33,6 +33,8 @@ def main() -> None:
     parser.add_argument("--eval-steps", type=int, default=150)
     parser.add_argument("--load-best-model", action="store_true",
                         help="Select minimum validation-loss checkpoint; eval/save intervals must match")
+    parser.add_argument("--resume-from-checkpoint", type=Path,
+                        help="Resume an interrupted training stage in this run; preserve completed stages")
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     model, dataset, root = args.model.resolve(), args.dataset.resolve(), args.run_dir.resolve()
@@ -46,7 +48,7 @@ def main() -> None:
         raise ValueError("Epochs and evaluation interval must be positive")
     if args.load_best_model and args.save_steps != args.eval_steps:
         raise ValueError("Best-model selection requires matching save/evaluation intervals")
-    root.mkdir(parents=True, exist_ok=False)
+    root.mkdir(parents=True, exist_ok=bool(args.resume_from_checkpoint))
     source_paths = [project / "training" / "train_lora.py",
         project / "training" / "assistant_loss.py", Path(__file__).resolve(),
         project / "scripts" / "evaluate_policy.py", project / "src" / "qmagent" / "policies.py"]
@@ -56,6 +58,30 @@ def main() -> None:
         "closed_loop_seed": args.closed_loop_seed, "stages": [],
         "scope": "Synthetic single-qubit research; no hardware or coupler access",
         "source_sha256": {str(path.relative_to(project)): sha256(path) for path in source_paths}}
+    if args.resume_from_checkpoint:
+        previous = json.loads((root / "status.json").read_text())
+        if previous.get("status") != "failed" or previous.get("current_stage") != "training":
+            raise ValueError("Checkpoint resume requires a failed training stage")
+        for key in ("model", "dataset", "closed_loop_seed"):
+            if previous.get(key) != state[key]:
+                raise ValueError(f"Resume provenance mismatch: {key}")
+        for path, checksum in previous["source_sha256"].items():
+            if path != "scripts/run_training_pipeline.py" and sha256(project / path) != checksum:
+                raise ValueError(f"Resume source changed: {path}")
+        checkpoint = args.resume_from_checkpoint.resolve()
+        if checkpoint.parent != root / "training":
+            raise ValueError("Checkpoint must belong to this run")
+        for name in ("adapter_model.safetensors", "optimizer.pt", "scheduler.pt", "trainer_state.json"):
+            if not (checkpoint / name).is_file():
+                raise ValueError(f"Incomplete checkpoint: {name}")
+        state = previous
+        state.update(status="running", pid=os.getpid(), gpu=args.gpu)
+        state.pop("error", None)
+        state.pop("finished", None)
+        state.setdefault("resume_history", []).append({
+            "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "checkpoint": str(checkpoint), "adapter_sha256": sha256(checkpoint / "adapter_model.safetensors"),
+            "pipeline_sha256": sha256(Path(__file__).resolve())})
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=args.gpu, HF_HUB_OFFLINE="1",
         TRANSFORMERS_OFFLINE="1", TOKENIZERS_PARALLELISM="false",
         PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True", PYTHONDONTWRITEBYTECODE="1",
@@ -68,11 +94,21 @@ def main() -> None:
         temporary.replace(root / "status.json")
 
     def run(name: str, command: list[object], scientific_failure: bool = False) -> None:
+        if args.resume_from_checkpoint:
+            prior = [item for item in state["stages"] if item["stage"] == name]
+            if any(item["status"] == "completed" for item in prior):
+                return
+            if name == "training":
+                if not prior or prior[-1]["command"] != list(map(str, command)):
+                    raise ValueError("Training parameters changed during resume")
+                command = command + ["--resume-from-checkpoint", checkpoint]
         item = {"stage": name, "command": list(map(str, command)), "status": "running"}
         state["stages"].append(item)
         state["current_stage"] = name
         save()
-        with (root / f"{name}.log").open("x") as log:
+        attempt = sum(item["stage"] == name for item in state["stages"])
+        log_path = root / (f"{name}.log" if attempt == 1 else f"{name}.attempt_{attempt}.log")
+        with log_path.open("x") as log:
             result = subprocess.run(list(map(str, command)), cwd=project, env=env,
                                     stdout=log, stderr=subprocess.STDOUT)
         item.update(returncode=result.returncode,
