@@ -53,11 +53,13 @@ class RegisteredHardwareBackend:
         return {"sequence": self._sequence}
 
     def restore(self, checkpoint: dict[str, int]) -> None:
-        if set(checkpoint) != {"sequence"} or type(checkpoint["sequence"]) is not int:
+        if (set(checkpoint) != {"sequence"} or type(checkpoint["sequence"]) is not int
+                or checkpoint["sequence"] < 0):
             raise ValueError("Invalid hardware-backend checkpoint")
         if self._safe_shutdown is not None:
             self._safe_shutdown()
-        self._sequence = checkpoint["sequence"]
+        # A physical acquisition cannot be rolled back. Never reuse its audit ID.
+        self._sequence = max(self._sequence, checkpoint["sequence"])
 
     def acquire(self, tool: str, state: dict, scan: dict) -> dict:
         if tool not in self._handlers:
@@ -70,28 +72,33 @@ class RegisteredHardwareBackend:
         self._sequence += 1
         try:
             raw = self._handlers[tool](copy.deepcopy(request))
+            if not isinstance(raw, dict):
+                raise TypeError("Hardware handler must return a raw observation object")
+            raw = copy.deepcopy(raw)
+            raw.setdefault("tool", tool)
+            raw.setdefault("current_parameters", copy.deepcopy(state))
+            raw.setdefault("scan", copy.deepcopy(scan))
+            raw["synthetic"] = False
+            raw["backend"] = self.backend_name
+            return raw
         except BaseException:
             if self._safe_shutdown is not None:
                 self._safe_shutdown()
             raise
-        if not isinstance(raw, dict):
-            raise TypeError("Hardware handler must return a raw observation object")
-        raw = copy.deepcopy(raw)
-        raw.setdefault("tool", tool)
-        raw.setdefault("current_parameters", copy.deepcopy(state))
-        raw.setdefault("scan", copy.deepcopy(scan))
-        raw["synthetic"] = False
-        raw["backend"] = self.backend_name
-        return raw
 
     def measure(self, tool: str, state: dict, scan: dict) -> dict:
         raw = self.acquire(tool, state, scan)
-        result = analyze(raw)
-        raw_hash = digest(raw)
-        return raw | result | {
-            "raw_artifact": {"id": "sha256:" + raw_hash, "sha256": raw_hash},
-            "tool_trace": [
-                {"tool": tool, "operation": "acquire", "output_sha256": raw_hash},
-                {"tool": result["analysis_tool"], "operation": "analyze", "input_sha256": raw_hash},
-            ],
-        }
+        try:
+            result = analyze(raw)
+            raw_hash = digest(raw)
+            return raw | result | {
+                "raw_artifact": {"id": "sha256:" + raw_hash, "sha256": raw_hash},
+                "tool_trace": [
+                    {"tool": tool, "operation": "acquire", "output_sha256": raw_hash},
+                    {"tool": result["analysis_tool"], "operation": "analyze", "input_sha256": raw_hash},
+                ],
+            }
+        except BaseException:
+            if self._safe_shutdown is not None:
+                self._safe_shutdown()
+            raise

@@ -95,20 +95,17 @@ class SimulatedBackend(MeasurementBackend):
         if np.min(bias) < -0.5 or np.max(bias) > 0.5:
             raise ValueError("Flux bias outside the configured safe range [-0.5, 0.5]")
         rows = []
-        resonance = []
         for value in bias:
             phase = 2 * np.pi * (value - truth.flux_sweetspot) / truth.flux_period
             qubit_shift = truth.flux_dispersion_hz * (1 - np.cos(phase)) / 2
             dispersive_shift = 6e6 / (1 + qubit_shift / 80e6)
             center = truth.bare_resonator_frequency_hz - dispersive_shift
-            resonance.append(center)
             rows.append(self._notch(freq, center, truth.resonator_linewidth_hz, 0.7))
         s21 = np.asarray(rows)
         return {
             "frequencies_hz": freq,
             "flux_bias": bias,
             "s21": s21 + self._complex_noise(s21.shape, 0.006),
-            "latent_resonance_hz": np.asarray(resonance),
         }
 
     def _acquire_qubit_spectroscopy(self, truth: QubitTruth, **parameters: Any) -> dict:

@@ -43,3 +43,55 @@ def test_hardware_failure_invokes_safe_shutdown():
     with pytest.raises(RuntimeError, match="instrument timeout"):
         backend.measure("sq.s21", copy.deepcopy(DEFAULT_STATE), {})
     assert shutdowns == [True]
+
+
+def test_hardware_sequence_is_never_reused_after_failed_acquisition_and_restore():
+    sequences = []
+    shutdowns = []
+
+    def sometimes_fails(request):
+        sequences.append(request["sequence"])
+        if len(sequences) == 1:
+            raise RuntimeError("instrument timeout")
+        return raw_s21(request)
+
+    backend = RegisteredHardwareBackend(
+        {"sq.s21": sometimes_fails}, lambda request: True,
+        lambda: shutdowns.append(True),
+    )
+    checkpoint = backend.checkpoint()
+    with pytest.raises(RuntimeError, match="instrument timeout"):
+        backend.measure("sq.s21", copy.deepcopy(DEFAULT_STATE), {})
+    backend.restore(checkpoint)
+    backend.measure("sq.s21", copy.deepcopy(DEFAULT_STATE), {})
+    assert sequences == [1, 2]
+    assert backend.checkpoint() == {"sequence": 2}
+    assert shutdowns
+
+
+def test_hardware_restore_rejects_negative_sequence():
+    backend = RegisteredHardwareBackend({"sq.s21": raw_s21}, lambda request: True)
+    with pytest.raises(ValueError, match="Invalid hardware-backend checkpoint"):
+        backend.restore({"sequence": -1})
+
+
+def test_invalid_hardware_observation_invokes_safe_shutdown():
+    shutdowns = []
+    backend = RegisteredHardwareBackend(
+        {"sq.s21": lambda request: None}, lambda request: True,
+        lambda: shutdowns.append(True),
+    )
+    with pytest.raises(TypeError, match="raw observation"):
+        backend.measure("sq.s21", copy.deepcopy(DEFAULT_STATE), {})
+    assert shutdowns == [True]
+
+
+def test_hardware_analysis_error_invokes_safe_shutdown():
+    shutdowns = []
+    backend = RegisteredHardwareBackend(
+        {"sq.s21": lambda request: {"measurement": {"i": [], "q": []}}},
+        lambda request: True, lambda: shutdowns.append(True),
+    )
+    with pytest.raises((ValueError, KeyError)):
+        backend.measure("sq.s21", copy.deepcopy(DEFAULT_STATE), {})
+    assert shutdowns == [True]

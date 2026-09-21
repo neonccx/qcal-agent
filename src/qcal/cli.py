@@ -43,7 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         print(f"{result.experiment:28s} {result.status:8s} {result.quality}")
     print(f"Artifacts: {output.resolve()}")
-    return 0 if all(r.status in {"success", "warning"} for r in results) else 1
+    return 0 if all(r.status == "success" for r in results) and (
+        args.command != "full" or len(results) == len(EXPERIMENTS)
+    ) else 1
 
 
 if __name__ == "__main__":

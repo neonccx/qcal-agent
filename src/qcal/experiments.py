@@ -29,7 +29,7 @@ class ExperimentSuite:
             fitted, quality, updates = analyzer(raw, parameters["drive_frequency_hz"])
         else:
             fitted, quality, updates = analyzer(raw)
-        status = "success" if quality.get("fit_ok", True) else "warning"
+        status = "success" if quality.get("fit_ok") is True else "warning"
         message = "analysis passed quality checks" if status == "success" else "result saved; inspect quality metrics before applying"
         result = ExperimentResult(name, self.calibration.qubit_id, parameters, raw, fitted, quality, updates, status=status, message=message)
         figure = plot_result(name, raw, fitted, self.output_dir / f"{name}.png")
@@ -90,5 +90,5 @@ class ExperimentSuite:
 
 EXPERIMENTS = (
     "resonator_spectroscopy", "resonator_punchout", "resonator_flux", "qubit_spectroscopy",
-    "iq_raw", "rabi", "ramsey", "t1", "drag", "single_qubit_xeb", "single_qubit_rb",
+    "rabi", "iq_raw", "ramsey", "t1", "drag", "single_qubit_xeb", "single_qubit_rb",
 )

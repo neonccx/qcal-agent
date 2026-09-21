@@ -17,6 +17,22 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def next_log_path(root: Path, name: str, attempt: int) -> Path:
+    """Keep copied historical logs intact when resuming on a different host."""
+    while True:
+        path = root / (f"{name}.log" if attempt == 1 else f"{name}.attempt_{attempt}.log")
+        if not path.exists():
+            return path
+        attempt += 1
+
+
+def reconcile_interrupted_stages(state: dict) -> None:
+    """Record a stage left running by a pipeline launch error as failed."""
+    for item in state["stages"]:
+        if item["status"] == "running":
+            item.update(status="failed", error=state.get("error", "prior pipeline interrupted"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
@@ -64,6 +80,7 @@ def main() -> None:
         previous = json.loads((root / "status.json").read_text())
         if previous.get("status") != "failed" or previous.get("current_stage") != "training":
             raise ValueError("Checkpoint resume requires a failed training stage")
+        reconcile_interrupted_stages(previous)
         for key in ("model", "dataset", "closed_loop_seed"):
             if previous.get(key) != state[key]:
                 raise ValueError(f"Resume provenance mismatch: {key}")
@@ -110,15 +127,21 @@ def main() -> None:
                 if not prior or prior[0]["command"] != list(map(str, command)):
                     raise ValueError("Training parameters changed during resume")
                 command = command + ["--resume-from-checkpoint", checkpoint]
-        item = {"stage": name, "command": list(map(str, command)), "status": "running"}
+        attempt = 1 + sum(item["stage"] == name for item in state["stages"])
+        log_path = next_log_path(root, name, attempt)
+        item = {"stage": name, "command": list(map(str, command)), "status": "running",
+                "log": str(log_path)}
         state["stages"].append(item)
         state["current_stage"] = name
         save()
-        attempt = sum(item["stage"] == name for item in state["stages"])
-        log_path = root / (f"{name}.log" if attempt == 1 else f"{name}.attempt_{attempt}.log")
-        with log_path.open("x") as log:
-            result = subprocess.run(list(map(str, command)), cwd=project, env=env,
-                                    stdout=log, stderr=subprocess.STDOUT)
+        try:
+            with log_path.open("x") as log:
+                result = subprocess.run(list(map(str, command)), cwd=project, env=env,
+                                        stdout=log, stderr=subprocess.STDOUT)
+        except BaseException as error:
+            item.update(status="failed", error=f"{type(error).__name__}: {error}")
+            save()
+            raise
         item.update(returncode=result.returncode,
                     status="completed" if result.returncode == 0 else "failed")
         save()

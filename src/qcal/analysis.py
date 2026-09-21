@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.constants import Boltzmann, Planck
 from scipy.optimize import curve_fit
 
 
@@ -109,35 +108,55 @@ def analyze_qubit_spectroscopy(data: dict) -> tuple[dict, dict, dict]:
     return fit, quality, {"qubit_frequency_hz": float(params[2])}
 
 
-def analyze_iq_raw(data: dict, qubit_frequency_hz: float) -> tuple[dict, dict, dict]:
+def analyze_iq_raw(data: dict, qubit_frequency_hz: float | None = None) -> tuple[dict, dict, dict]:
+    """Train an IQ discriminator and evaluate it on shots not used to fit it.
+
+    ``qubit_frequency_hz`` is retained for API compatibility. A nominal-|0>
+    assignment error is not an identifiable thermal population or temperature.
+    """
     iq0 = np.asarray(data["iq_state0"], dtype=float)
     iq1 = np.asarray(data["iq_state1"], dtype=float)
-    center0, center1 = iq0.mean(axis=0), iq1.mean(axis=0)
+    if (iq0.ndim != 2 or iq1.ndim != 2 or iq0.shape[1] != 2 or iq1.shape[1] != 2
+            or min(len(iq0), len(iq1)) < 100 or not np.isfinite(iq0).all()
+            or not np.isfinite(iq1).all()):
+        raise ValueError("IQraw requires at least 100 finite I/Q shots per prepared state")
+    train0, train1 = int(0.7 * len(iq0)), int(0.7 * len(iq1))
+    center0, center1 = iq0[:train0].mean(axis=0), iq1[:train1].mean(axis=0)
     direction = center1 - center0
-    direction /= np.linalg.norm(direction)
+    separation = float(np.linalg.norm(direction))
+    direction = direction / separation if separation > 1e-12 else np.array([1.0, 0.0])
     projected0, projected1 = iq0 @ direction, iq1 @ direction
-    values = np.concatenate([projected0, projected1])
-    labels = np.concatenate([np.zeros(len(projected0), dtype=int), np.ones(len(projected1), dtype=int)])
+    values = np.concatenate([projected0[:train0], projected1[:train1]])
+    labels = np.concatenate([np.zeros(train0, dtype=int), np.ones(train1, dtype=int)])
     order = np.argsort(values)
     sorted_labels = labels[order]
-    errors = np.cumsum(sorted_labels == 1) + np.cumsum((sorted_labels == 0)[::-1])[::-1]
-    cut = int(np.argmin(errors[:-1]))
-    threshold = float((values[order[cut]] + values[order[cut + 1]]) / 2)
-    pred0, pred1 = projected0 > threshold, projected1 > threshold
+    sorted_values = values[order]
+    errors = np.cumsum(sorted_labels == 1)[:-1] / train1 + (
+        train0 - np.cumsum(sorted_labels == 0)[:-1]
+    ) / train0
+    valid_cuts = sorted_values[:-1] < sorted_values[1:]
+    if valid_cuts.any():
+        cut = int(np.argmin(np.where(valid_cuts, errors, np.inf)))
+        threshold = float((sorted_values[cut] + sorted_values[cut + 1]) / 2)
+    else:
+        threshold = float(sorted_values[0])
+    heldout0, heldout1 = projected0[train0:], projected1[train1:]
+    pred0, pred1 = heldout0 > threshold, heldout1 > threshold
     confusion = np.array([[np.sum(~pred0), np.sum(pred0)], [np.sum(~pred1), np.sum(pred1)]], dtype=int)
     p10, p01 = float(np.mean(pred0)), float(np.mean(~pred1))
     fidelity = 1 - 0.5 * (p10 + p01)
-    pooled_sigma = np.sqrt(0.5 * (np.var(projected0) + np.var(projected1)))
-    snr = abs(np.mean(projected1) - np.mean(projected0)) / max(pooled_sigma, 1e-12)
-    thermal = float(np.clip(p10, 1e-6, 0.499999))
-    temperature = Planck * qubit_frequency_hz / (Boltzmann * np.log((1 - thermal) / thermal))
+    pooled_sigma = np.sqrt(0.5 * (np.var(heldout0) + np.var(heldout1)))
+    snr = abs(np.mean(heldout1) - np.mean(heldout0)) / max(pooled_sigma, 1e-12)
     fit = {
         "center_state0": center0, "center_state1": center1, "rotation_angle_rad": float(np.arctan2(direction[1], direction[0])),
         "threshold": threshold, "projected_state0": projected0, "projected_state1": projected1,
         "confusion_matrix": confusion, "assignment_fidelity": float(fidelity), "snr": float(snr),
-        "estimated_thermal_population": thermal, "estimated_temperature_k": float(temperature),
+        "apparent_state0_excited_fraction": p10,
+        "training_shots_per_state": [train0, train1],
+        "validation_shots_per_state": [len(heldout0), len(heldout1)],
     }
-    quality = {"assignment_fidelity": float(fidelity), "snr": float(snr), "fit_ok": bool(fidelity > 0.85)}
+    quality = {"assignment_fidelity": float(fidelity), "snr": float(snr),
+               "validation": "held_out_30_percent", "fit_ok": bool(fidelity > 0.85 and separation > 1e-12)}
     return fit, quality, {"iq_rotation_rad": fit["rotation_angle_rad"], "iq_threshold": threshold, "readout_fidelity": float(fidelity)}
 
 
