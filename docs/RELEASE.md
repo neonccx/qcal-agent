@@ -1,5 +1,9 @@
 # QCal Agent 1.0.0 — single-qubit simulation adapter
 
+The public model card, checksums and downloadable adapter are maintained in
+[`qcal-agent-model`](https://github.com/neonccx/qcal-agent-model), with the
+versioned artifacts in its [v1.0.0 Release](https://github.com/neonccx/qcal-agent-model/releases/tag/v1.0.0).
+
 This is a PEFT LoRA adapter for [Nanbeige4.2-3B](https://huggingface.co/Nanbeige/Nanbeige4.2-3B).
 The upstream model card declares Apache-2.0. The base weights are **not** included
 in this bundle. The included `adapter_config.json` names the public base model;

@@ -40,7 +40,7 @@ not closed-loop convergence on real hardware.
   server. Its SHA256 archive is
   `94b3433e74c663dbe79c6d28a261d913831198891a0e22e47d1b57b3aab69337`.
   The bundle and portable manifest are published in the
-  [v1.0.0 GitHub Release](https://github.com/neonccx/qcal-agent/releases/tag/v1.0.0);
+  [`qcal-agent-model` v1.0.0 GitHub Release](https://github.com/neonccx/qcal-agent-model/releases/tag/v1.0.0);
   see [release notes](RELEASE.md).
 - There is no recorded supervised real-device run, channel map, laboratory
   limit configuration or approved emergency-stop test in this repository.
