@@ -39,7 +39,9 @@ not closed-loop convergence on real hardware.
 - A portable PEFT adapter bundle was packaged and load-tested on the 5090
   server. Its SHA256 archive is
   `94b3433e74c663dbe79c6d28a261d913831198891a0e22e47d1b57b3aab69337`.
-  This does not mean it has been published to GitHub; see [release notes](RELEASE.md).
+  The bundle and portable manifest are published in the
+  [v1.0.0 GitHub Release](https://github.com/neonccx/qcal-agent/releases/tag/v1.0.0);
+  see [release notes](RELEASE.md).
 - There is no recorded supervised real-device run, channel map, laboratory
   limit configuration or approved emergency-stop test in this repository.
 
