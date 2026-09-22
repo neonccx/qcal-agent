@@ -8,6 +8,12 @@ QCal Agent 是面向超导量子单比特自动校准的完整第一版工程。
 - 数据集生成、泄漏审计、Nanbeige4.2-3B LoRA 微调、离线评测和闭环评测；
 - 内容寻址原始数据、拟合质量门控和留出 IQ shot 验收。
 
+正式训练使用的四分割合成数据集已作为独立的
+[`dataset-v1.0.0` Release](https://github.com/neonccx/qcal-agent/releases/tag/dataset-v1.0.0)
+发布，包含 4,637 条训练、782 条验证、511 条冻结测试和 986 条 OOD 记录，
+以及划分清单与 SHA256 校验。数据范围和复现边界见
+[数据集说明](docs/DATASET.md)。
+
 本仓库已发布 `v1.0.0`，不要求用户理解历史实验版本。新 LoRA 已完成训练并通过配置的模拟数据发布门禁，便携 PEFT 包已在服务器打包和加载验证。模型卡、评测清单和下载附件独立发布在 [`qcal-agent-model`](https://github.com/neonccx/qcal-agent-model) 的 [v1.0.0 Release](https://github.com/neonccx/qcal-agent-model/releases/tag/v1.0.0)。代码版本号和模拟门禁均不代表已通过真机验收。旧数据和旧模型只用于内部对照，不进入第一版命名或默认配置。
 
 ## 安全与科研边界
