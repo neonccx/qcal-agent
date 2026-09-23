@@ -5,6 +5,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 runs/
+sessions/
+reports/
 datasets/
 dataset/
 checkpoints/

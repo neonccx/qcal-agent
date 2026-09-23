@@ -111,12 +111,37 @@ class RPCTests(unittest.TestCase):
 
     def test_remote_profile_roundtrip_and_command_quoting(self):
         profile = RemoteProfile.from_dict({"host": "user@example", "project": "/home/user/project with spaces",
-                                          "control_path": "/tmp/qcal-test.sock"})
+                                          "control_path": "/tmp/qcal-test.sock", "local_results": "/tmp/results"})
         save_remote(self.home, profile)
         self.assertEqual(load_remote(self.home), profile)
         self.assertIn("'/home/user/project with spaces'", profile.command()[-1])
         self.assertIn("BatchMode=yes", profile.command())
         self.assertNotIn("-t", profile.command())
+        self.assertIn("user@example:/safe/report-1", profile.scp_command("/safe/report-1", "/tmp/out"))
+
+    def test_local_report_download_is_split_by_session(self):
+        root = self.home / "local"
+        profile = RemoteProfile.from_dict({"host": "user@example", "project": "/project",
+                                           "local_results": str(root)})
+        client = object.__new__(RemoteService)
+        client.profile = profile
+        client.cached_info = {"session_id": "session-1"}
+        def fake_run(command, check):
+            self.assertTrue(check)
+            downloaded = Path(command[-1]) / "export-1"
+            downloaded.mkdir()
+            for name, text in (("result.json", "{}"), ("run_config.json", "{}"),
+                               ("trajectory.jsonl", "{}\n"), ("report.md", "# report"),
+                               ("iq_metrics.json", "{}")):
+                (downloaded / name).write_text(text)
+        with unittest.mock.patch("qmagent.remote.subprocess.run", side_effect=fake_run):
+            saved = client.save_report_locally({"directory": "/safe/export-1", "session_id": "session-1",
+                                                "status": {"status": "accepted"}})
+        self.assertTrue((Path(saved["session"]) / "trajectory.jsonl").is_file())
+        self.assertTrue((Path(saved["report"]) / "report.md").is_file())
+        self.assertFalse((Path(saved["report"]) / "result.json").exists())
+        with self.assertRaises(FileExistsError):
+            client.save_report_locally({"directory": "/safe/export-1", "session_id": "session-1", "status": {}})
 
     def test_remote_profile_rejects_credentials_or_commands(self):
         for value in ({}, {"host": "-oProxyCommand=bad", "project": "/tmp"},

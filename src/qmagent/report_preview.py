@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 
 
-def save_preview(result, home):
+def save_preview(result, home, directory=None):
     preview = result.get("preview")
     if preview is None:
         return None
@@ -19,9 +19,13 @@ def save_preview(result, home):
     if (len(data) > 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n")
             or hashlib.sha256(data).hexdigest() != preview.get("sha256")):
         raise ValueError("Report image failed integrity check")
-    root = Path(home) / "reports"
-    root.mkdir(parents=True, exist_ok=True)
-    directory = Path(tempfile.mkdtemp(prefix="iq-", dir=root))
+    if directory is None:
+        root = Path(home) / "reports"
+        root.mkdir(parents=True, exist_ok=True)
+        directory = Path(tempfile.mkdtemp(prefix="iq-", dir=root))
+    else:
+        directory = Path(directory).resolve()
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     (directory / "iq_report.png").write_bytes(data)
     status = result.get("status", {})
     details = html.escape(json.dumps({"controller_status": status.get("status"),

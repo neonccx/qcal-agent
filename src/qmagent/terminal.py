@@ -276,8 +276,13 @@ class Terminal:
             self.say("Report exported (Agent host): " + result["directory"])
             if result.get("plot_note"):
                 self.say(result["plot_note"])
+            local = (self.service.save_report_locally(result)
+                     if getattr(self.service, "remote", False) else None)
+            if local:
+                self.say("Session results (local): " + local["session"])
+                self.say("Report files (local): " + local["report"])
             from .report_preview import save_preview
-            page = save_preview(result, self.home)
+            page = save_preview(result, self.home, directory=Path(local["report"]) if local else None)
             if page:
                 self.say("IQ report (local): " + str(page))
                 if sys.platform == "darwin" and self.output is print:
@@ -406,6 +411,8 @@ def main(argv=None):
     remote.add_argument("--project", required=True)
     remote.add_argument("--control-path", required=True, type=Path)
     remote.add_argument("--server-home")
+    remote.add_argument("--local-results", type=Path,
+                        help="Mac qcal-agent directory for downloaded sessions/ and reports/")
     sub.add_parser("connect", help="Connect to server Agent").add_argument("--resume", dest="session_id")
     sub.add_parser("login", help="Open system SSH; enter credentials there yourself")
     args = parser.parse_args(argv)
@@ -414,7 +421,8 @@ def main(argv=None):
         if args.command == "remote":
             from .remote import RemoteProfile, save_remote
             profile = RemoteProfile.from_dict({"host": args.host, "project": args.project,
-                "control_path": str(args.control_path.expanduser().resolve()), "home": args.server_home})
+                "control_path": str(args.control_path.expanduser().resolve()), "home": args.server_home,
+                "local_results": str(args.local_results.expanduser().resolve()) if args.local_results else None})
             save_remote(home, profile)
             print(safe_text(f"Remote configuration saved: {home / 'remote.json'}; run qm-agent or qm-agent connect."))
             return 0

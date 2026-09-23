@@ -47,3 +47,21 @@ python scripts/audit_dataset.py dataset
 - `scripts/`：数据构建、审计、服务器流水线和发布检查。
 - `tests/`：Agent、测控和训练目标测试。
 - `docs/`：第一版架构、真机接入和评测声明。
+
+## Mac 连接服务器与保存结果
+
+远程模式只在服务器加载模型。配置时用 `--local-results` 指定 Mac 上的仓库目录：
+
+```bash
+qm-agent remote \
+  --host bishe-5090 \
+  --project /home/caochuangxin/bishe/qcal-agent \
+  --control-path ~/.ssh/qcal-agent-5090.sock \
+  --server-home /home/caochuangxin/bishe/qcal-agent-home \
+  --local-results /Users/soraka/lab/3/qcal-agent
+qm-agent connect
+```
+
+校准完成后在 Agent 中执行 `/report`。公开、可审计的会话结果会下载到
+`sessions/<session-id>/`，图表和 HTML/PDF 报告会下载到
+`reports/<session-id>/`。这两个目录属于本机运行产物，已被 Git 忽略；服务器仍保存可恢复的运行状态。

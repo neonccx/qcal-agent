@@ -181,7 +181,8 @@ class AgentService:
             raise ValueError("Invalid report directory")
         destination = Path(target) if target else self.session.directory / f"export-{self.session.journal.sequence:06d}"
         destination = self.session.export(destination)
-        result = {"directory": str(destination), "status": self.status()}
+        result = {"directory": str(destination), "session_id": self.session.metadata["session_id"],
+                  "status": self.status()}
         png = destination / "iq_report.png"
         if (destination / "plot_error.json").exists():
             result["plot_note"] = "Numerical report saved, but plotting failed. Inspect plot_error.json; report dependencies may be missing."

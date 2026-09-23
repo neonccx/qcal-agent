@@ -6,7 +6,9 @@ from pathlib import Path, PurePosixPath
 import re
 import selectors
 import shlex
+import shutil
 import subprocess
+import tempfile
 import time
 
 from .conversation import validate_message
@@ -20,10 +22,11 @@ class RemoteProfile:
     project: str
     control_path: str | None = None
     home: str | None = None
+    local_results: str | None = None
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict) or set(value) - {"host", "project", "control_path", "home"}:
+        if not isinstance(value, dict) or set(value) - {"host", "project", "control_path", "home", "local_results"}:
             raise ValueError("Invalid remote profile; credentials/commands are not supported")
         if not {"host", "project"} <= set(value):
             raise ValueError("Missing remote host/project")
@@ -40,6 +43,9 @@ class RemoteProfile:
             raise ValueError("Missing remote project")
         if result.control_path is not None and (not isinstance(result.control_path, str) or not Path(result.control_path).is_absolute()):
             raise ValueError("Control socket path must be absolute")
+        if result.local_results is not None and (not isinstance(result.local_results, str)
+                                                  or not Path(result.local_results).is_absolute()):
+            raise ValueError("Local results path must be absolute")
         return result
 
     def command(self, session_id=None):
@@ -61,6 +67,15 @@ class RemoteProfile:
             raise ValueError("Configure --control-path for reusable interactive SSH login")
         return ["ssh", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600",
                 "-o", "ControlPath=" + self.control_path, self.host]
+
+    def scp_command(self, remote_directory, local_directory):
+        if (not isinstance(remote_directory, str) or not PurePosixPath(remote_directory).is_absolute()
+                or not re.fullmatch(r"[A-Za-z0-9_./-]+", remote_directory)):
+            raise ValueError("Invalid server report path")
+        command = ["scp", "-q", "-r", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+        if self.control_path:
+            command += ["-o", "ControlPath=" + self.control_path]
+        return command + [self.host + ":" + remote_directory, str(local_directory)]
 
 
 def save_remote(home, profile):
@@ -176,12 +191,52 @@ class RemoteService:
             raise
         if result.get("ok") is not True:
             raise RuntimeError(result.get("error", "Remote Agent failed"))
-        return result["result"]
+        value = result["result"]
+        if method in {"info", "new", "resume"} and isinstance(value, dict):
+            self.cached_info = value
+        return value
 
     def __getattr__(self, name):
         if name in METHODS:
             return lambda **params: self.call(name, **params)
         raise AttributeError(name)
+
+    def save_report_locally(self, result):
+        """Download a public report export and split it into local session/report folders."""
+        if not self.profile or not self.profile.local_results:
+            return None
+        status = result.get("status", {})
+        session_id = result.get("session_id")
+        remote_directory = result.get("directory")
+        if (not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session_id)
+                or not isinstance(remote_directory, str)):
+            raise ValueError("Invalid report metadata")
+        root = Path(self.profile.local_results).expanduser().resolve()
+        sessions_root, reports_root = root / "sessions", root / "reports"
+        sessions_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        reports_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        session_target, report_target = sessions_root / session_id, reports_root / session_id
+        if session_target.exists() or report_target.exists():
+            raise FileExistsError(f"Local results already exist for session {session_id}; remove them before exporting again")
+        with tempfile.TemporaryDirectory(prefix=".qcal-download-", dir=root) as temporary:
+            staging = Path(temporary)
+            subprocess.run(self.profile.scp_command(remote_directory, staging), check=True)
+            sources = [path for path in staging.iterdir() if path.is_dir()]
+            if len(sources) != 1:
+                raise ValueError("Unexpected downloaded report layout")
+            source = sources[0]
+            session_target.mkdir(mode=0o700)
+            report_target.mkdir(mode=0o700)
+            session_names = {"result.json", "run_config.json", "trajectory.jsonl"}
+            for path in source.iterdir():
+                if not path.is_file() or path.is_symlink():
+                    raise ValueError("Unexpected item in downloaded report")
+                destination = session_target if path.name in session_names else report_target
+                shutil.move(str(path), destination / path.name)
+            if not (session_target / "result.json").is_file() or not (report_target / "report.md").is_file():
+                raise ValueError("Downloaded report is incomplete")
+        return {"session": str(session_target), "report": str(report_target),
+                "status": status.get("status")}
 
     def _disconnect(self):
         if not self.connected:
